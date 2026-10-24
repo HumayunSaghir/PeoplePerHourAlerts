@@ -1,0 +1,12 @@
+{
+  "contacts": [
+    "447700900001",
+    "447700900002"
+  ],
+  "includeSelf": false,
+  "pollSeconds": 120,
+  "pages": [
+    "https://www.peopleperhour.com/freelance-jobs"
+  ],
+  "timezone": "Europe/London"
+}

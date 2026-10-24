@@ -1,0 +1,5 @@
+auth/
+config.json
+state.json
+*.bak
+node_modules/
