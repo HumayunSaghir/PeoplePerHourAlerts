@@ -100,6 +100,9 @@ the jobs that are live at that moment; alerts begin with the next new job.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `contacts` | `[]` | Numbers that receive alerts. Country code first, digits only, e.g. `"447700900001"`. |
+| `admins` | `[]` | Numbers allowed to add and remove contacts by WhatsApp message. Empty turns that feature off. |
+| `countryCode` | none | Lets people type local numbers like `0300…`. For Pakistan use `"92"`. |
+| `maxContacts` | `20` | Upper limit for the contact list. |
 | `includeSelf` | `true` | Also send alerts to the linked number itself. Turn this off if the sender should stay quiet. |
 | `pollSeconds` | `120` | How often to check for new jobs. |
 | `pages` | all jobs | Which listing pages to watch. Use a category page to narrow it down, e.g. `https://www.peopleperhour.com/freelance-jobs/technology-programming`. |
@@ -110,7 +113,20 @@ Each contact gets a one-time "alerts activated" message the first time a given s
 
 ### Adding or removing a contact
 
-On a server, use the helper script. It edits `config.json` and restarts the bot for you:
+**By WhatsApp message (admins only).** Put the admin's number in `admins` (and your country code in `countryCode`,
+so a number starting with 0 is understood). The admin then sends the bot's number:
+
+| Message | What happens |
+| --- | --- |
+| `add 447700900123` | Adds the number and sends it the welcome message |
+| `remove 447700900123` | Removes it |
+| `list` | Shows everyone on the list |
+| `help` | Shows these commands |
+
+Only admins can do this. Messages from anyone else, including normal contacts, are ignored. The list is capped at
+`maxContacts` (default 20) and commands are rate-limited.
+
+**On a server, with SSH.** Use the helper script. It edits `config.json` and restarts the bot for you:
 
 ```bash
 cd ~/pph

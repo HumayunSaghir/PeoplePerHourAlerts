@@ -177,13 +177,79 @@ _Alerts are sent from +${selfNumber(sock)}_` });
   }
 }
 
-const idNum = j => String(j || '').split('@')[0].split(':')[0].replace(/D/g, '');
+const idNum = j => String(j || '').split('@')[0].split(':')[0].replace(/\D/g, '');
 function isAllowed(sock, key) {
   const peers = [key.remoteJid, key.remoteJidAlt, key.participantAlt, key.participant].filter(Boolean).map(idNum);
   const mine = [selfNumber(sock), idNum(sock.user.lid)].filter(Boolean);
   if (key.fromMe) return peers.some(p => mine.includes(p));              // you typed it in your own chat
   const allowed = targets(sock).map(idNum);
   return peers.some(p => allowed.includes(p));                           // a listed contact messaged us
+}
+
+// ---- Contact management by WhatsApp message (admins only) -------------------------------------------------------
+// An admin sends "add 447700900123", "remove 447700900123" or "list" to the bot's number. Everyone else is ignored.
+const MAX_CONTACTS = Number(cfg.maxContacts) || 20;
+const adminNumbers = () => (cfg.admins || []).map(n => normalizeNumber(n)).filter(Boolean);
+// Digits only, with country code. A leading 0 is read as a local number when `countryCode` is set (e.g. "92").
+function normalizeNumber(raw) {
+  let n = String(raw || '').replace(/\D/g, '');
+  if (n.startsWith('00')) n = n.slice(2);
+  else if (n.startsWith('0') && cfg.countryCode) n = String(cfg.countryCode).replace(/\D/g, '') + n.slice(1);
+  return /^[1-9]\d{9,14}$/.test(n) ? n : null;
+}
+const pretty = n => '+' + n;
+function saveContacts() {
+  const raw = JSON.parse(readFileSync(CONFIG, 'utf8'));
+  raw.contacts = cfg.contacts;
+  writeFileSync(CONFIG, JSON.stringify(raw, null, 2) + '\n');
+}
+const HELP = `👥 *CONTACT MANAGER*\n\n` +
+  `➕ *add* 447700900123\n➖ *remove* 447700900123\n📋 *list*\n\n` +
+  `_Use the country code. A number starting with 0 is read as a local number${cfg.countryCode ? ` (+${cfg.countryCode})` : ''}._`;
+const adminLog = [];                                                         // timestamps, to rate-limit commands
+
+// Returns true if the message was an admin command (handled or refused), false if it is something else.
+async function handleAdminCommand(sock, m, text) {
+  const cmd = /^(add|remove|delete|list|help)\b\s*(.*)$/is.exec(text);
+  if (!cmd) return false;
+  const admins = adminNumbers();
+  if (!admins.length || m.key.fromMe) return false;
+  const senders = [m.key.remoteJid, m.key.remoteJidAlt, m.key.participantAlt, m.key.participant].filter(Boolean).map(idNum);
+  if (!senders.some(s => admins.includes(s))) {
+    console.log(`contact command from ${mask(m.key.remoteJid)}: ignored (not an admin or number unverified)`);
+    return false;
+  }
+  const now = Date.now();
+  while (adminLog.length && now - adminLog[0] > 60000) adminLog.shift();
+  const reply = t => sock.sendMessage(m.key.remoteJid, { text: t });
+  if (adminLog.length >= 10) { await reply('⏳ Too many commands. Please wait a minute.'); return true; }
+  adminLog.push(now);
+
+  const action = cmd[1].toLowerCase(), arg = cmd[2].trim();
+  try {
+    if (action === 'help') { await reply(HELP); return true; }
+    if (action === 'list') {
+      await reply(`📋 *ALERT CONTACTS* (${cfg.contacts.length}/${MAX_CONTACTS})\n\n` + (cfg.contacts.map((n, i) => `${i + 1}. ${pretty(n)}`).join('\n') || '_none yet_'));
+      return true;
+    }
+    const num = normalizeNumber(arg);
+    if (!num) { await reply(`⚠️ That doesn't look like a valid number.\n\n${HELP}`); return true; }
+    if (action === 'add') {
+      if (num === selfNumber(sock)) { await reply('⚠️ That is the sending number itself.'); return true; }
+      if (cfg.contacts.includes(num)) { await reply(`ℹ️ ${pretty(num)} is already on the list.`); return true; }
+      if (cfg.contacts.length >= MAX_CONTACTS) { await reply(`⚠️ The list is full (${MAX_CONTACTS}). Remove someone first.`); return true; }
+      cfg.contacts.push(num); saveContacts();
+      console.log(`contact added by admin: ${mask(num)} (${cfg.contacts.length} total)`);
+      await reply(`✅ Added ${pretty(num)}.\nContacts: ${cfg.contacts.length}/${MAX_CONTACTS}. They will receive the welcome message now.`);
+      await sendIntros(sock);
+    } else {
+      if (!cfg.contacts.includes(num)) { await reply(`ℹ️ ${pretty(num)} is not on the list.`); return true; }
+      cfg.contacts = cfg.contacts.filter(n => n !== num); saveContacts();
+      console.log(`contact removed by admin: ${mask(num)} (${cfg.contacts.length} total)`);
+      await reply(`✅ Removed ${pretty(num)}.\nContacts: ${cfg.contacts.length}/${MAX_CONTACTS}.`);
+    }
+  } catch (e) { console.error('contact command failed:', e.message); await reply('⚠️ Something went wrong. Nothing was changed.').catch(() => {}); }
+  return true;
 }
 
 async function start() {
@@ -197,7 +263,8 @@ async function start() {
       if (age > 120) continue;                                         // ignore history replayed on connect
       const c = normalizeMessageContent(m.message) || {};
       const text = (c.conversation || c.extendedTextMessage?.text || '').trim();
-      if (!/^(tops?5|5)$/i.test(text)) continue;
+      if (await handleAdminCommand(sock, m, text)) continue;
+      if (!/^(top\s?5|5)$/i.test(text)) continue;
       const ok = isAllowed(sock, m.key);
       console.log(`top5 request from ${mask(m.key.remoteJid)}${m.key.fromMe ? ' (you)' : ''}: ${ok ? 'replying' : 'ignored (not on your list)'}`);
       if (!ok) continue;

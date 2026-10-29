@@ -8,5 +8,7 @@
   "pages": [
     "https://www.peopleperhour.com/freelance-jobs"
   ],
-  "timezone": "Europe/London"
+  "timezone": "Europe/London",
+  "admins": [],
+  "countryCode": ""
 }
